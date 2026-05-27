@@ -1,0 +1,16 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.env
+
+# Node
+frontend/oris-frontend/node_modules/
+frontend/oris-frontend/.next/
+
+# Next.js env
+frontend/oris-frontend/.env.local
+
+# macOS
+.DS_Store
