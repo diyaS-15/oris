@@ -5,6 +5,7 @@ from db.supabase import get_client
 from services.extraction import spacy_extractor, cluster_extractor
 from services.graph import graph_builder
 from services.ingestion import embedder
+from services.questions import question_generator
 
 
 def run_pipeline(course_id: str) -> None:
@@ -77,6 +78,15 @@ def run_pipeline(course_id: str) -> None:
         print(f"[pipeline] Stage 5: Building concept graph edges")
         graph_builder.build_graph(db, course_id, inserted)
         print(f"[pipeline] Graph edges stored")
+
+        # --- Stage 6: Generate practice questions ---
+        import os
+        if os.environ.get("GROQ_API_KEY") and os.environ["GROQ_API_KEY"] != "your_groq_api_key_here":
+            print(f"[pipeline] Stage 6: Generating practice questions")
+            total = question_generator.generate_questions_for_course(db, course_id)
+            print(f"[pipeline] Stored {total} questions")
+        else:
+            print(f"[pipeline] Stage 6: Skipping question generation (GROQ_API_KEY not set)")
 
         # --- Done ---
         status = "ready_slides_only" if slides_only else "ready"
