@@ -34,6 +34,7 @@ SINGLE_WORD_BLOCKLIST = {
     "queries", "sequence", "output", "input", "model",
     # Fix 4 additions
     "time", "tokens", "blank", "system",
+    "symbols", "task", "randomness", "words",
 }
 
 # Multi-word phrases that are never concepts regardless of frequency.
