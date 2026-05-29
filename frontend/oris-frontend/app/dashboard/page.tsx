@@ -1,17 +1,32 @@
-// Dashboard page — shown after login, displays the user's email and a sign-out button.
+// Dashboard page — lists all courses for the logged-in user and hosts the add-course flow.
 import { getServerClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import SignOutButton from '@/components/auth/SignOutButton'
-import BackendStatus from '@/components/BackendStatus'
-import UploadForm from '@/components/upload/UploadForm'
+import CourseList from '@/components/dashboard/CourseList'
 
 export default async function DashboardPage() {
   const supabase = await getServerClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect('/login')
-  }
+  if (!user) redirect('/login')
+
+  // Fetch all courses for this user, newest first
+  const { data: courses } = await supabase
+    .from('courses')
+    .select('id, name, created_at, status')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+
+  // Fetch concept counts in parallel
+  const coursesWithCounts = await Promise.all(
+    (courses ?? []).map(async (course) => {
+      const { count } = await supabase
+        .from('concepts')
+        .select('*', { count: 'exact', head: true })
+        .eq('course_id', course.id)
+      return { ...course, concept_count: count ?? 0 }
+    })
+  )
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50">
@@ -23,10 +38,8 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col items-center justify-center gap-6 px-8">
-        <h2 className="text-2xl font-semibold text-zinc-900">Upload course materials</h2>
-        <UploadForm userId={user.id} />
-        <BackendStatus />
+      <main className="flex flex-1 flex-col items-center px-8 py-10">
+        <CourseList userId={user.id} initialCourses={coursesWithCounts} />
       </main>
     </div>
   )
