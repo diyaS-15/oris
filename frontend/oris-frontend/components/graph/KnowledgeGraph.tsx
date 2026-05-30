@@ -30,6 +30,12 @@ interface Question {
   citation: string
 }
 
+interface Source {
+  source_file: string
+  source_type: string
+  page_or_slide_number: number
+}
+
 interface Props {
   concepts: Concept[]
   edges: Edge[]
@@ -78,26 +84,61 @@ const STYLESHEET: StylesheetStyle[] = [
   },
 ]
 
-export default function KnowledgeGraph({ concepts, edges, slidesOnly, courseId }: Props) {
+function getNextConcept(concepts: Concept[], edges: Edge[], selectedId: string): Concept | null {
+  const unreviewed = concepts.filter((c) => !c.reviewed && c.id !== selectedId)
+  if (unreviewed.length === 0) return null
+
+  const neighborIds = new Set(
+    edges
+      .filter((e) => e.source_concept_id === selectedId || e.target_concept_id === selectedId)
+      .map((e) => e.source_concept_id === selectedId ? e.target_concept_id : e.source_concept_id)
+  )
+
+  const unreviewedNeighbors = unreviewed.filter((c) => neighborIds.has(c.id))
+  const pool = unreviewedNeighbors.length > 0 ? unreviewedNeighbors : unreviewed
+  return pool.reduce((best, c) => c.exam_weight > best.exam_weight ? c : best)
+}
+
+export default function KnowledgeGraph({ concepts: initialConcepts, edges, slidesOnly, courseId }: Props) {
+  const [concepts, setConcepts] = useState<Concept[]>(initialConcepts)
   const [selected, setSelected] = useState<Concept | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
-  const [questionsLoading, setQuestionsLoading] = useState(false)
+  const [sources, setSources] = useState<Source[]>([])
+  const [loading, setLoading] = useState(false)
   const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
 
   useEffect(() => {
     if (!selected) {
       setQuestions([])
+      setSources([])
       setExpandedQuestion(null)
       return
     }
-    setQuestionsLoading(true)
+    setLoading(true)
     setQuestions([])
+    setSources([])
     setExpandedQuestion(null)
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/courses/${courseId}/concepts/${selected.id}/questions`)
-      .then((r) => r.ok ? r.json() : [])
-      .then((data) => setQuestions(data))
-      .catch(() => setQuestions([]))
-      .finally(() => setQuestionsLoading(false))
+
+    const base = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/courses/${courseId}/concepts/${selected.id}`
+    Promise.all([
+      fetch(`${base}/questions`).then((r) => r.ok ? r.json() : []),
+      fetch(`${base}/sources`).then((r) => r.ok ? r.json() : []),
+    ])
+      .then(([qs, srcs]) => {
+        setQuestions(qs)
+        // Deduplicate sources by file + page (slide links may duplicate practice links)
+        const seen = new Set<string>()
+        const deduped = (srcs as Source[]).filter((s) => {
+          const key = `${s.source_file}:${s.page_or_slide_number}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        setSources(deduped)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [selected?.id])
 
   const elements: ElementDefinition[] = [
@@ -123,6 +164,23 @@ export default function KnowledgeGraph({ concepts, edges, slidesOnly, courseId }
       },
     })),
   ]
+
+  async function toggleReviewed() {
+    if (!selected || reviewLoading) return
+    setReviewLoading(true)
+    const newValue = !selected.reviewed
+    try {
+      await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/courses/${courseId}/concepts/${selected.id}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewed: newValue }) }
+      )
+      const updated = { ...selected, reviewed: newValue }
+      setSelected(updated)
+      setConcepts((prev) => prev.map((c) => c.id === selected.id ? updated : c))
+    } finally {
+      setReviewLoading(false)
+    }
+  }
 
   function onCyInit(cy: Core) {
     cy.on('tap', 'node', (evt) => {
@@ -181,43 +239,87 @@ export default function KnowledgeGraph({ concepts, edges, slidesOnly, courseId }
             </p>
           </div>
 
-          {selected.reviewed && (
-            <p className="text-xs text-zinc-400 italic px-5 pb-2">Marked as reviewed</p>
-          )}
+          {/* Mark as reviewed button */}
+          <div className="px-5 pb-3">
+            <button
+              onClick={toggleReviewed}
+              disabled={reviewLoading}
+              className={`w-full rounded-lg border px-3 py-2 text-xs font-medium transition disabled:opacity-40 ${
+                selected.reviewed
+                  ? 'border-zinc-200 bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+                  : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+              }`}
+            >
+              {reviewLoading ? '...' : selected.reviewed ? 'Reviewed ✓' : 'Mark as reviewed'}
+            </button>
+          </div>
 
           {/* Divider */}
           <div className="border-t border-zinc-100 mx-5" />
 
-          {/* Practice questions */}
-          <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2">
-            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
-              Practice questions
-            </p>
-
-            {questionsLoading && (
-              <p className="text-xs text-zinc-400">Loading...</p>
-            )}
-
-            {!questionsLoading && questions.length === 0 && (
-              <p className="text-xs text-zinc-400">No questions generated for this concept.</p>
-            )}
-
-            {questions.map((q) => (
-              <div key={q.id} className="rounded-lg border border-zinc-100 bg-zinc-50 overflow-hidden">
+          {/* Study next suggestion */}
+          {(() => {
+            const next = getNextConcept(concepts, edges, selected.id)
+            if (!next) return null
+            return (
+              <div className="px-5 pb-3">
+                <p className="text-xs text-zinc-400 mb-1.5">Study next</p>
                 <button
-                  className="w-full text-left px-3 py-2.5 text-xs text-zinc-700 font-medium leading-snug"
-                  onClick={() => setExpandedQuestion(expandedQuestion === q.id ? null : q.id)}
+                  onClick={() => setSelected(next)}
+                  className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition capitalize"
                 >
-                  {q.question}
+                  {next.name}
+                  <span className="ml-2 text-zinc-400 font-normal">
+                    {Math.round(next.exam_weight * 100)}%
+                  </span>
                 </button>
-                {expandedQuestion === q.id && (
-                  <div className="border-t border-zinc-100 px-3 py-2.5 flex flex-col gap-1.5">
-                    <p className="text-xs text-zinc-600 leading-relaxed">{q.answer}</p>
-                    <p className="text-xs text-zinc-400 italic">{q.citation}</p>
-                  </div>
-                )}
               </div>
-            ))}
+            )
+          })()}
+
+          <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-4">
+            {loading && <p className="text-xs text-zinc-400">Loading...</p>}
+
+            {/* Sources */}
+            {!loading && sources.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Sources</p>
+                {sources.map((s, i) => (
+                  <p key={i} className="text-xs text-zinc-500">
+                    {s.source_file}
+                    <span className="text-zinc-400">, {s.source_type === 'slide' ? 'slide' : 'page'} {s.page_or_slide_number}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Practice questions */}
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                Practice questions
+              </p>
+
+              {!loading && questions.length === 0 && (
+                <p className="text-xs text-zinc-400">No questions generated for this concept.</p>
+              )}
+
+              {questions.map((q) => (
+                <div key={q.id} className="rounded-lg border border-zinc-100 bg-zinc-50 overflow-hidden">
+                  <button
+                    className="w-full text-left px-3 py-2.5 text-xs text-zinc-700 font-medium leading-snug"
+                    onClick={() => setExpandedQuestion(expandedQuestion === q.id ? null : q.id)}
+                  >
+                    {q.question}
+                  </button>
+                  {expandedQuestion === q.id && (
+                    <div className="border-t border-zinc-100 px-3 py-2.5 flex flex-col gap-1.5">
+                      <p className="text-xs text-zinc-600 leading-relaxed">{q.answer}</p>
+                      <p className="text-xs text-zinc-400 italic">{q.citation}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

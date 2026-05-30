@@ -69,6 +69,110 @@ def get_concept_questions(course_id: str, concept_id: str):
     return questions
 
 
+@router.patch("/courses/{course_id}/concepts/{concept_id}")
+def update_concept(course_id: str, concept_id: str, body: dict):
+    db = get_client()
+    allowed = {k: v for k, v in body.items() if k in {"reviewed"}}
+    if not allowed:
+        raise HTTPException(status_code=400, detail="No updatable fields provided")
+    updated = (
+        db.table("concepts")
+        .update(allowed)
+        .eq("id", concept_id)
+        .eq("course_id", course_id)
+        .execute()
+        .data
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    return updated[0]
+
+
+@router.get("/courses/{course_id}/concepts/{concept_id}/sources")
+def get_concept_sources(course_id: str, concept_id: str):
+    db = get_client()
+    links = (
+        db.table("concept_chunks")
+        .select("chunk_id")
+        .eq("concept_id", concept_id)
+        .execute()
+        .data
+    )
+    if not links:
+        return []
+    chunk_ids = [l["chunk_id"] for l in links]
+    chunks = (
+        db.table("chunks")
+        .select("source_file, source_type, page_or_slide_number")
+        .in_("id", chunk_ids)
+        .order("page_or_slide_number")
+        .execute()
+        .data
+    )
+    return chunks
+
+
+@router.get("/courses/{course_id}/brief")
+def get_brief(course_id: str):
+    db = get_client()
+
+    course_resp = db.table("courses").select("id, name, status").eq("id", course_id).execute()
+    if not course_resp.data:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    concepts = (
+        db.table("concepts")
+        .select("id, name, exam_weight, reviewed")
+        .eq("course_id", course_id)
+        .order("exam_weight", desc=True)
+        .limit(10)
+        .execute()
+        .data
+    )
+
+    result = []
+    for concept in concepts:
+        concept_id = concept["id"]
+
+        questions = (
+            db.table("questions")
+            .select("id, question, answer, citation")
+            .eq("concept_id", concept_id)
+            .limit(3)
+            .execute()
+            .data
+        )
+
+        links = (
+            db.table("concept_chunks")
+            .select("chunk_id")
+            .eq("concept_id", concept_id)
+            .execute()
+            .data
+        )
+        sources = []
+        if links:
+            chunk_ids = [l["chunk_id"] for l in links]
+            raw_sources = (
+                db.table("chunks")
+                .select("source_file, source_type, page_or_slide_number")
+                .in_("id", chunk_ids)
+                .order("page_or_slide_number")
+                .execute()
+                .data
+            )
+            seen = set()
+            for s in raw_sources:
+                key = f"{s['source_file']}:{s['page_or_slide_number']}"
+                if key not in seen:
+                    seen.add(key)
+                    sources.append(s)
+
+        result.append({**concept, "questions": questions, "sources": sources})
+
+    return {"course": course_resp.data[0], "concepts": result}
+
+
 # ---------------------------------------------------------------------------
 # File management
 # ---------------------------------------------------------------------------

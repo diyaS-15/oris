@@ -40,7 +40,21 @@ export default async function CoursePage({ params }: Props) {
           <span className="text-zinc-200">|</span>
           <span className="text-sm font-medium text-zinc-900">{course.name}</span>
         </div>
-        <span className="text-xs text-zinc-400">{concepts.length} concepts</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-zinc-400">{concepts.length} concepts</span>
+          <Link
+            href={`/course/${id}/study`}
+            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition"
+          >
+            Study plan
+          </Link>
+          <Link
+            href={`/course/${id}/brief`}
+            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition"
+          >
+            Exam brief
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
