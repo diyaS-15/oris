@@ -52,7 +52,7 @@ export default async function CoursePage({ params }: Props) {
               <p className="text-xs text-zinc-400">Use the panel on the right to add files.</p>
             </div>
           ) : (
-            <KnowledgeGraph concepts={concepts} edges={edges} slidesOnly={slidesOnly} />
+            <KnowledgeGraph concepts={concepts} edges={edges} slidesOnly={slidesOnly} courseId={id} />
           )}
         </div>
 

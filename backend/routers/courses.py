@@ -56,6 +56,19 @@ def get_graph(course_id: str):
     return {"course": course_resp.data[0], "concepts": concepts, "edges": edges}
 
 
+@router.get("/courses/{course_id}/concepts/{concept_id}/questions")
+def get_concept_questions(course_id: str, concept_id: str):
+    db = get_client()
+    questions = (
+        db.table("questions")
+        .select("id, question, answer, citation")
+        .eq("concept_id", concept_id)
+        .execute()
+        .data
+    )
+    return questions
+
+
 # ---------------------------------------------------------------------------
 # File management
 # ---------------------------------------------------------------------------

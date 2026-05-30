@@ -13,6 +13,17 @@ def run_pipeline(course_id: str) -> None:
     db = get_client()
 
     try:
+        # --- Stage 0: Deduplication guard ---
+        existing = db.table("concepts").select("id").eq("course_id", course_id).execute().data
+        if existing:
+            concept_ids = [c["id"] for c in existing]
+            db.table("questions").delete().in_("concept_id", concept_ids).execute()
+            db.table("concept_chunks").delete().in_("concept_id", concept_ids).execute()
+            db.table("concept_edges").delete().in_("source_concept_id", concept_ids).execute()
+            db.table("concept_edges").delete().in_("target_concept_id", concept_ids).execute()
+            db.table("concepts").delete().eq("course_id", course_id).execute()
+            print(f"[pipeline] Stage 0: Cleared existing data for course {course_id}")
+
         # --- Stage 1: Load chunks ---
         print(f"[pipeline] Stage 1: Loading chunks from database")
         chunks_resp = (
@@ -73,6 +84,11 @@ def run_pipeline(course_id: str) -> None:
         if links:
             db.table("concept_chunks").insert(links).execute()
             print(f"[pipeline] Stored {len(links)} concept-chunk links")
+
+        # --- Stage 3.5: Link concepts to slide chunks ---
+        print(f"[pipeline] Stage 3.5: Linking {len(inserted)} concepts to top-5 slide chunks via embeddings")
+        slide_links = embedder.link_concepts_to_slide_chunks(db, course_id, inserted)
+        print(f"[pipeline] Stored {slide_links} concept-to-slide-chunk links")
 
         # --- Stage 5: Build graph ---
         print(f"[pipeline] Stage 5: Building concept graph edges")

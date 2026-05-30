@@ -3,7 +3,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Core, ElementDefinition, StylesheetStyle } from 'cytoscape'
 
 const CytoscapeComponent = dynamic(() => import('react-cytoscapejs'), { ssr: false })
@@ -23,10 +23,18 @@ interface Edge {
   weight: number
 }
 
+interface Question {
+  id: string
+  question: string
+  answer: string
+  citation: string
+}
+
 interface Props {
   concepts: Concept[]
   edges: Edge[]
   slidesOnly: boolean
+  courseId: string
 }
 
 const STYLESHEET: StylesheetStyle[] = [
@@ -70,8 +78,27 @@ const STYLESHEET: StylesheetStyle[] = [
   },
 ]
 
-export default function KnowledgeGraph({ concepts, edges, slidesOnly }: Props) {
+export default function KnowledgeGraph({ concepts, edges, slidesOnly, courseId }: Props) {
   const [selected, setSelected] = useState<Concept | null>(null)
+  const [questions, setQuestions] = useState<Question[]>([])
+  const [questionsLoading, setQuestionsLoading] = useState(false)
+  const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selected) {
+      setQuestions([])
+      setExpandedQuestion(null)
+      return
+    }
+    setQuestionsLoading(true)
+    setQuestions([])
+    setExpandedQuestion(null)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/courses/${courseId}/concepts/${selected.id}/questions`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setQuestions(data))
+      .catch(() => setQuestions([]))
+      .finally(() => setQuestionsLoading(false))
+  }, [selected?.id])
 
   const elements: ElementDefinition[] = [
     ...concepts.map((c) => ({
@@ -126,8 +153,9 @@ export default function KnowledgeGraph({ concepts, edges, slidesOnly }: Props) {
 
       {/* Concept card panel */}
       {selected && (
-        <div className="absolute right-4 top-4 w-64 rounded-xl border border-zinc-200 bg-white shadow-md p-5 flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-2">
+        <div className="absolute right-4 top-4 w-72 rounded-xl border border-zinc-200 bg-white shadow-md flex flex-col max-h-[calc(100%-2rem)] overflow-hidden">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-2 p-5 pb-3">
             <h3 className="text-sm font-semibold text-zinc-900 leading-snug capitalize">
               {selected.name}
             </h3>
@@ -139,7 +167,8 @@ export default function KnowledgeGraph({ concepts, edges, slidesOnly }: Props) {
             </button>
           </div>
 
-          <div>
+          {/* Exam weight */}
+          <div className="px-5 pb-3">
             <p className="text-xs text-zinc-500 mb-1">Exam weight</p>
             <div className="h-2 w-full rounded-full bg-zinc-100 overflow-hidden">
               <div
@@ -153,8 +182,43 @@ export default function KnowledgeGraph({ concepts, edges, slidesOnly }: Props) {
           </div>
 
           {selected.reviewed && (
-            <p className="text-xs text-zinc-400 italic">Marked as reviewed</p>
+            <p className="text-xs text-zinc-400 italic px-5 pb-2">Marked as reviewed</p>
           )}
+
+          {/* Divider */}
+          <div className="border-t border-zinc-100 mx-5" />
+
+          {/* Practice questions */}
+          <div className="flex-1 overflow-y-auto px-5 py-3 flex flex-col gap-2">
+            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+              Practice questions
+            </p>
+
+            {questionsLoading && (
+              <p className="text-xs text-zinc-400">Loading...</p>
+            )}
+
+            {!questionsLoading && questions.length === 0 && (
+              <p className="text-xs text-zinc-400">No questions generated for this concept.</p>
+            )}
+
+            {questions.map((q) => (
+              <div key={q.id} className="rounded-lg border border-zinc-100 bg-zinc-50 overflow-hidden">
+                <button
+                  className="w-full text-left px-3 py-2.5 text-xs text-zinc-700 font-medium leading-snug"
+                  onClick={() => setExpandedQuestion(expandedQuestion === q.id ? null : q.id)}
+                >
+                  {q.question}
+                </button>
+                {expandedQuestion === q.id && (
+                  <div className="border-t border-zinc-100 px-3 py-2.5 flex flex-col gap-1.5">
+                    <p className="text-xs text-zinc-600 leading-relaxed">{q.answer}</p>
+                    <p className="text-xs text-zinc-400 italic">{q.citation}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
